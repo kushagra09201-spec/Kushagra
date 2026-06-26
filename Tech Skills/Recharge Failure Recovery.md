@@ -36,8 +36,9 @@ To address this issue, the system was designed to:
 * Display bill details to users using previously cached data.
 * Accept recharge requests even when external services were unavailable.
 * Update bill status in Cassandra for 2 payment scenarios: partial payment and full payment.
-* Cache bill data with a** TTL** for each product, allowing customers to reuse previously fetched bill information.
+* Cache bill data with a **TTL** for each product, allowing customers to reuse previously fetched bill information.
 * For example Cylinder, Bill details were cached in Cassandra for **35 days**. User-specific data was stored per customer, while the cylinder amount was determined by **city and gas provider**, enabling price updates to be reflected for all applicable users without calling the external service.
+* Configured Kafka with acks=all and replication factor 2 to ensure reliable message delivery and durability. 
 * Process pending recharge requests automatically once the external services recovered.
 * Process deferred requests in configurable batches (typically **50 requests per batch**) to avoid overwhelming downstream systems after recovery.
 
@@ -53,8 +54,7 @@ To address this issue, the system was designed to:
 
 ### Why Kafka?
 
-During production, the recharge service was handling around **100 TPS**. Initially, the average response time was around **600 ms**, which started increasing as traffic grew. The recharge API was performing **bill validation, incentive calculation, and downstream bill processing synchronously** within the user request. This became the primary bottleneck, requiring frequent horizontal scaling of the recharge service just to maintain response times. Configured Kafka with acks=all and replication factor 2 to ensure reliable message delivery and durability. Implemented automatic retries with Dead Letter Queue (DLQ) handling, revalidating external service availability before reprocessing failed transactions.
-
+During production, the recharge service was handling around **100 TPS**. Initially, the average response time was around **600 ms**, which started increasing as traffic grew. The recharge API was performing **bill validation, incentive calculation, and downstream bill processing synchronously** within the user request. This became the primary bottleneck, requiring frequent horizontal scaling of the recharge service just to maintain response times. 
 After analyzing the production metrics, I suggested introducing **Kafka** to decouple the synchronous processing from the user request flow.
 
 This approach provided several benefits:
@@ -80,7 +80,7 @@ Cassandra was selected because it provides:
 * **NoSQL over PostgreSQL:** A relational database like PostgreSQL was unnecessary because the data consists of independent key-value records with TTL (Time-To-Live). There are no relationships or complex joins, making a distributed NoSQL database a better fit.
 * **High Write Throughput:** Optimized for write-heavy workloads using sequential disk writes, making it ideal for continuously storing bill data for several days.
 * **Horizontal Scalability:** Nodes can be added seamlessly to handle increasing traffic and data volume while maintaining high availability.
-* **Comparing Redis: **The system stored around **5 TB** of bill data. Cassandra provided scalable, disk-based storage at a lower cost, whereas Redis is optimized for in-memory caching and would have been significantly more expensive for persisting data at this scale.
+* **Comparing Redis:** The system stored around **5 TB** of bill data. Cassandra provided scalable, disk-based storage at a lower cost, whereas Redis is optimized for in-memory caching and would have been significantly more expensive for persisting data at this scale.
 
 ## Technical Challenges
 
@@ -89,6 +89,7 @@ Several technical challenges were addressed during development:
 * Preventing duplicate recharge processing during retries after external service recovery.
 * Determining an appropriate TTL for different bill types to balance cache freshness and storage cost.
 * Recovering thousands of deferred recharge requests without creating traffic spikes.
+* For Kafka, implemented automatic retries with Dead Letter Queue (DLQ) handling, revalidating external service availability before reprocessing failed transactions.
 * Ensuring cached bill data remained consistent after partial and full payment scenarios.
 * Balancing response time improvements while maintaining transaction reliability.
 
@@ -113,13 +114,14 @@ Bill details from external services were cached in Cassandra during normal opera
 During service outages:
 
 * Cached bill details served within **50–80 ms**.
+* Collecting funds on the basis of these bills
 * Recharge requests were stored in PostgreSQL in a deferred state.
 
 ### 3. Recovery and Processing
 
-* Service health was validated by sending test requests.
+* Service health was validated by repeating recharge requests.
 * Once the external service became available, deferred recharge requests were processed automatically.
-* Batch processing limited to **500 requests per batch** with retry intervals to avoid downstream overload.
+* Batch processing limited to **50 requests per batch** with retry intervals to avoid downstream overload.
 
 ## Circuit Breaker States
 
@@ -129,13 +131,13 @@ The open state was triggered when the external operator started rejecting reques
 
 | State     | Description                                                                                                            |
 | --------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Closed    | Normal operations with direct external service calls.<br>releasing the recharge request from deferred state in batches |
+| Closed    | Normal operations with direct external service calls.<br> On recovery, releasing the recharge request from deferred state in batches |
 | Open      | Cached data from Cassandra was used, and recharge requests were stored in a deferred state.                            |
 | Half-Open | Service recovery was validated by sending a 5 requests to external services in sliding window                          |
 
 ## Deployment Topology
 
-The application was deployed on AWS EC2 instances behind AWS API Gateway.
+The application was deployed on AWS EC2 instances
 
 Infrastructure included:
 
@@ -147,7 +149,7 @@ Infrastructure included:
 * CloudWatch for infrastructure monitoring and scaling triggers
 * Jenkins for build, deployment, and release automation
 
-Auto Scaling Groups were configured with a mix of On-Demand and Spot instances. Scaling policies were based on historical traffic patterns, allowing the system to increase Spot capacity during predictable high-traffic day and night windows. When CloudWatch alarms detected elevated load or threshold breaches, the scaling policy was updated and additional instances were launched automatically to maintain performance and availability.
+Auto Scaling Groups were configured with a mix of On-Demand and Spot instances. Scaling policies were based on historical traffic patterns, allowing the system to increase Spot capacity during predictable high-traffic day higher number of spot instances and night lower number of spot instances. Additionally, when CloudWatch alarms detected elevated load or threshold breaches, the scaling policy was updated and additional instances were launched automatically to maintain performance and availability.
 
 Jenkins was used to automate the deployment pipeline, enabling consistent application releases across environments.
 
