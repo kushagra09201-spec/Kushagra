@@ -20,12 +20,14 @@ Designed and developed a resilient recharge failure recovery architecture using 
 
 External service outages caused recharge failures. Failed transactions meant the platform could not debit customer funds, resulting in the loss of **BBPS incentives** and **user platform charges**, while also impacting customer satisfaction due to unsuccessful recharges. These repeated retries overloaded downstream systems
 
-											  
-																																
-																											
-																			  
+## Business Impact
 
-   
+The solution improved business continuity, customer trust, and operational efficiency during external service outages.
+
+* Increased revenue by accepting recharge requests even when external BBPS providers were unavailable, ensuring platform charges and partner incentives were not lost due to temporary outages.
+* Improved customer trust and retention by allowing users to complete recharge requests during provider downtime, reducing the likelihood of customers switching to competing platforms.
+* Reduced infrastructure and operational costs by preventing repeated retry attempts and cascading failures through the Circuit Breaker pattern, protecting downstream services from unnecessary load.
+* Eliminated manual intervention by automatically recovering and processing pending recharge transactions once external services became available.
 
 ## Solution
 
@@ -40,12 +42,6 @@ To address this issue, the system was designed to:
 * Process deferred requests in configurable batches (typically **50 requests per batch**) to avoid overwhelming downstream systems after recovery.
 
 ## Key Responsibilities
-																					   
-													   
-																				  
-																   
-																												  
-																					   
 
 * Gathered and analyzed client requirements to define project scope and solutions.
 * Collaborated in resource planning and allocation based on project needs.
@@ -53,36 +49,20 @@ To address this issue, the system was designed to:
 * Implemented circuit breaker-based resiliency mechanisms to handle external service downtime.
 * Participated in the complete SDLC, including development, testing, production deployment, and post-production support.
 
-   
-
 ## Architecture Decisions
 
 ### Why Kafka?
 
-During production, the recharge service was handling around **100 TPS**. Initially, the average response time was around **600 ms**, which started increasing as traffic grew. The recharge API was performing **bill validation, incentive calculation, and downstream bill processing synchronously** within the user request. This became the primary bottleneck, requiring frequent horizontal scaling of the recharge service just to maintain response times.
+During production, the recharge service was handling around **100 TPS**. Initially, the average response time was around **600 ms**, which started increasing as traffic grew. The recharge API was performing **bill validation, incentive calculation, and downstream bill processing synchronously** within the user request. This became the primary bottleneck, requiring frequent horizontal scaling of the recharge service just to maintain response times. Configured Kafka with acks=all and replication factor 2 to ensure reliable message delivery and durability. Implemented automatic retries with Dead Letter Queue (DLQ) handling, revalidating external service availability before reprocessing failed transactions.
 
 After analyzing the production metrics, I suggested introducing **Kafka** to decouple the synchronous processing from the user request flow.
 
 This approach provided several benefits:
-					   
-					  
-						 
 
 * **Reduced API response time** from approximately **600 ms to around 300 ms**, improving the customer experience.
 * Decoupled services, allowing recharge and bill processing to evolve independently.
 * Improved scalability, as Kafka consumers can scale horizontally based on message volume.
 * Increased resilience, since temporary downstream failures do not directly impact the recharge service and events can be retried.
-																					   
-
-				   
-
-														   
-														 
-													  
-																		   
-															 
-
-   
 
 ### Why Cassandra?
 
@@ -94,21 +74,37 @@ Cassandra was selected because it provides:
 * Efficient TTL-based data expiration.
 * Low storage cost for multi-terabyte datasets.
 
-#### Further Comparisions
+#### Comparing Diffrent Storage Tools
+
 * **Open-Source Alternative to Aerospike:** Cassandra provides enterprise-grade scalability, fault tolerance, and automatic data replication without licensing costs, helping reduce long-term operational expenses.
 * **NoSQL over PostgreSQL:** A relational database like PostgreSQL was unnecessary because the data consists of independent key-value records with TTL (Time-To-Live). There are no relationships or complex joins, making a distributed NoSQL database a better fit.
 * **High Write Throughput:** Optimized for write-heavy workloads using sequential disk writes, making it ideal for continuously storing bill data for several days.
 * **Horizontal Scalability:** Nodes can be added seamlessly to handle increasing traffic and data volume while maintaining high availability.
 * **Comparing Redis: **The system stored around **5 TB** of bill data. Cassandra provided scalable, disk-based storage at a lower cost, whereas Redis is optimized for in-memory caching and would have been significantly more expensive for persisting data at this scale.
 
+## Technical Challenges
+
+Several technical challenges were addressed during development:
+
+* Preventing duplicate recharge processing during retries after external service recovery.
+* Determining an appropriate TTL for different bill types to balance cache freshness and storage cost.
+* Recovering thousands of deferred recharge requests without creating traffic spikes.
+* Ensuring cached bill data remained consistent after partial and full payment scenarios.
+* Balancing response time improvements while maintaining transaction reliability.
+
+## Complexity of the Solution
+
+The solution involved more than simply implementing a Circuit Breaker.
+
+* Integration with multiple external biller services having different response behaviors.
+* Handling high transaction volumes while maintaining low response times.
+* Coordinating data across PostgreSQL, Cassandra, Kafka, and external services.
+* Managing multiple recharge states such as pending, deferred, processing, success, and failure.
+* Supporting automatic recovery without manual operational intervention.
 
 ## Three-Stage Recovery Process
 
 ### 1. Data Caching
-								
-											
-									  
-											   
 
 Bill details from external services were cached in Cassandra during normal operations.
 
@@ -128,7 +124,6 @@ During service outages:
 ## Circuit Breaker States
 
 Circuit Breaker was implemented using Resilience4j.
-													 
 
 The open state was triggered when the external operator started rejecting requests or when response times increased beyond the configured threshold, resulting in higher waiting times for users. Once the failure rate crossed the allowed limit, the circuit breaker tripped to the open state and stopped sending further requests to the external service. This prevented repeated failures, reduced unnecessary load on the downstream system, and allowed the application to serve cached bill details and defer recharge requests safely.
 
@@ -141,9 +136,6 @@ The open state was triggered when the external operator started rejecting reques
 ## Deployment Topology
 
 The application was deployed on AWS EC2 instances behind AWS API Gateway.
-										
-														
-														
 
 Infrastructure included:
 
@@ -156,13 +148,6 @@ Infrastructure included:
 * Jenkins for build, deployment, and release automation
 
 Auto Scaling Groups were configured with a mix of On-Demand and Spot instances. Scaling policies were based on historical traffic patterns, allowing the system to increase Spot capacity during predictable high-traffic day and night windows. When CloudWatch alarms detected elevated load or threshold breaches, the scaling policy was updated and additional instances were launched automatically to maintain performance and availability.
-																			
-															   
-																			   
-														
-																	 
-															   
-																						
 
 Jenkins was used to automate the deployment pipeline, enabling consistent application releases across environments.
 
@@ -176,9 +161,6 @@ API Gateway handled incoming client requests by providing:
 * Secure access to backend microservices
 
 API Gateway routed requests to backend services running behind Auto Scaling Groups, ensuring that traffic was distributed efficiently across the application tier.
-							 
-							   
-								
 
 ## Logging and Monitoring
 
@@ -198,11 +180,17 @@ API Gateway routed requests to backend services running behind Auto Scaling Grou
 
 ## Transaction Management
 
-Recharge transactions were maintained using PostgreSQL.
+Designed a reliable transaction management mechanism to ensure recharge requests were never lost during external service outages.
 
-Each recharge request was persisted with its processing status. During external failures, requests were marked as deferred. After successful recovery, pending transactions were retried and their status updated, ensuring reliable processing without losing requests.
+* Implemented **idempotent transaction processing** using unique transaction IDs to prevent duplicate recharge requests.
+* Persisted failed recharge requests in **PostgreSQL** with a **PENDING** status before responding to the customer.
+* Used the **Circuit Breaker** state to determine whether requests should be processed immediately or deferred for later execution.
+* Leveraged **Kafka** to asynchronously process deferred transactions once external services became available.
+* Maintained transaction lifecycle using statuses such as **PENDING**, **PROCESSING**, **SUCCESS**, and **FAILED**, ensuring complete auditability.
+* Enabled automatic recovery of pending transactions without manual intervention, guaranteeing reliable and consistent transaction processing.
 
 ##
+
 
 ## Architecture Diagram
 
