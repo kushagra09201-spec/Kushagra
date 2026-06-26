@@ -191,6 +191,27 @@ Designed a reliable transaction management mechanism to ensure recharge requests
 * Maintained transaction lifecycle using statuses such as **PENDING**, **PROCESSING**, **SUCCESS**, and **FAILED**, ensuring complete auditability.
 * Enabled automatic recovery of pending transactions without manual intervention, guaranteeing reliable and consistent transaction processing.
 
+## Production Issues and Learnings
+
+### 1. Vault Configuration Issue
+
+After one production deployment, the application failed to establish database connections even though no application code had changed.
+
+**Root Cause**
+
+The encrypted database password stored in Vault contained an unintended leading whitespace, causing authentication failures during application startup.
+
+**Resolution**
+
+* Compared decrypted credentials with the expected configuration.
+* Worked with the Vault team to correct the secret.
+* Added startup validation and improved deployment verification to detect malformed secrets before production rollout.
+
+**Learning**
+
+Configuration validation is as important as application validation, especially when secrets are managed by external teams.
+
+
 ##
 
 
