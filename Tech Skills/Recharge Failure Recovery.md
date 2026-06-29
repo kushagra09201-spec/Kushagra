@@ -76,7 +76,7 @@ This approach provided several benefits:
 
 * **Enabled the transition from a monolithic processing model to an event-driven microservice architecture.** Earlier, the Recharge API was responsible for executing the complete business workflow, making it tightly coupled with bill processing, Rule-Engine updates, and external service integration. Kafka decoupled these responsibilities into independent microservices communicating through events, allowing each service to evolve, deploy, and scale independently without impacting other components.
 
-* **Decoupled services**, allowing the Recharge API, Bill Processing Service and downstream integrations to operate independently without introducing direct service dependencies. This reduced inter-service coupling and simplified maintenance and future enhancements.
+* **Decoupled services**, allowing the Recharge API, Bill Storing Service and downstream integrations to operate independently without introducing direct service dependencies. This reduced inter-service coupling and simplified maintenance and future enhancements.
 
 * **Improved scalability**, as Kafka consumers can scale horizontally based on message volume without requiring additional instances of the Recharge API. During peak traffic, only the consumers responsible for downstream processing need to be scaled, resulting in better resource utilization and lower infrastructure costs.
 
@@ -117,7 +117,10 @@ Incentive Calculation
 Call External BBPS Service
     |
     v
-Update Bill Status
+Update Bill
+    |
+    v
+Store Bill in Cassandra
     |
     v
 Persist Transaction
@@ -153,7 +156,7 @@ Return Response
 ----------------------------------------------
 
 Kafka Consumer
-(Recharge Processing Service)
+(Bill Storing Service)
     |
     v
 Lookup Product & Category
@@ -174,11 +177,10 @@ Bill Validation
 Incentive Calculation
     |
     v
-Call External BBPS Service
+Call External Service to Validate Data
     |
     v
-Update Bill Status
-(PostgreSQL)
+Store Bill in Cassandra
 ```
 
 ### Why Cassandra?
@@ -218,7 +220,7 @@ The solution involved more than simply implementing a Circuit Breaker.
 
 * Integration with multiple external biller services having different response behaviors.
 * Handling high transaction volumes while maintaining low response times.
-* Coordinating the Health Check Service, Deferred Processing Service, Recharge Processing Service, PostgreSQL, Cassandra, and Kafka while maintaining data consistency and transaction reliability.
+* Coordinating the Health Check Service, Deferred Processing Service, Bill Storing Service, PostgreSQL, Cassandra, and Kafka while maintaining data consistency and transaction reliability.
 * Managing multiple recharge states such as pending, deferred, processing, success, and failure.
 * Supporting automatic recovery without manual operational intervention.
 
@@ -245,7 +247,7 @@ After successful validation:
 * All deferred recharge requests marked as **awaiting = true** were updated to **awaiting = false**.
 * A dedicated **Deferred Processing Service** periodically scanned PostgreSQL for requests with **PENDING** status and **awaiting = false**.
 * Eligible requests were picked in configurable batches (typically **50 requests per batch**) to prevent overwhelming downstream systems.
-* Each request was then forwarded to the Recharge Processing Service, where normal recharge validation and processing were performed.
+* Each request was then forwarded to the Recharge API, where normal recharge validation and processing were performed.
 * Transaction status was updated to **SUCCESS** or **FAILED**, ensuring complete auditability and automatic recovery without manual intervention.
 
 ## Recharge Failure Recovery Microservices Flow
@@ -267,15 +269,15 @@ After successful validation:
 ### 3. Deferred Processing Service
 - Read eligible pending requests
 - Process requests in batches
-- Forward eligible transactions to Recharge Processing Service
+- Forward eligible transactions to Recharge API
 
 ---
 
-### 4. Recharge Processing Service
+### 4. Bill Storing Service
 - Bill validation
 - Rule-Engine
 - Call external BBPS providers
-- Update transaction status in PostgreSQL
+- Store the bill in Cassandra Database
 
 ## Circuit Breaker States
 
