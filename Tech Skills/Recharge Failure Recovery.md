@@ -60,6 +60,7 @@ Configured Kafka with acknowledgements (acks=all) and a replication factor of 3 
 * Gathered and analyzed client requirements to define project scope and solutions.
 * Collaborated in resource planning and allocation based on project needs.
 * Designed and developed Spring Boot microservices for recharge failure recovery workflows.
+* Leveraged **GitHub Copilot (Agent Mode)** with Claude and ChatGPT to accelerate feature development, generate unit tests, and improve development productivity while validating all AI-generated code through manual review.
 * Implemented circuit breaker-based resiliency mechanisms to handle external service downtime.
 * Participated in the complete SDLC, including development, testing, production deployment, and post-production support.
 
@@ -67,7 +68,7 @@ Configured Kafka with acknowledgements (acks=all) and a replication factor of 3 
 
 ### Why Kafka?
 
-During production, the recharge service was handling around **100 TPS**. Initially, the average response time was around **600 ms**, which started increasing as traffic grew. The recharge API was performing **bill validation, Rule-Engine updates, and othrr downstream bill processing synchronously** within the user request. This became the primary bottleneck, requiring frequent horizontal scaling of the recharge service just to maintain response times. 
+During production, the recharge service was handling around **100 TPS**. Initially, the average response time was around **600 ms**, which started increasing as traffic grew. The recharge API was performing **bill validation, Rule-Engine updates, and other downstream bill processing synchronously** within the user request. This became the primary bottleneck, requiring frequent horizontal scaling of the recharge service just to maintain response times. 
 After analyzing the production metrics, I suggested introducing **Kafka** to decouple the synchronous processing from the user request flow.
 
 This approach provided several benefits:
@@ -198,7 +199,7 @@ Hence, Cassandra was selected because recharge systems continuously generate lar
 #### Comparing Diffrent Storage Tools
 
 * **Open-Source Alternative to Aerospike:** Cassandra provides enterprise-grade scalability, fault tolerance, and automatic data replication without licensing costs, helping reduce long-term operational expenses.
-* **NoSQL over PostgreSQL:** A relational database like PostgreSQL was unnecessary because the data consists of independent key-value records with TTL (Time-To-Live). There are no relationships or complex joins, making a di/stributed NoSQL database a better fit.
+* **NoSQL over PostgreSQL:** A relational database like PostgreSQL was unnecessary because the data consists of independent key-value records with TTL (Time-To-Live). There are no relationships or complex joins, making a distributed NoSQL database a better fit.
 * **High Write Throughput:** Optimized for write-heavy workloads using sequential disk writes, making it ideal for continuously storing bill data for several days.
 * **Horizontal Scalability:** Nodes can be added seamlessly to handle increasing traffic and data volume while maintaining high availability.
 * **Comparing Redis:** The system stored around **5 TB** of bill data. Cassandra provided scalable, disk-based storage at a lower cost, whereas Redis is optimized for in-memory caching and would have been significantly more expensive for persisting data at this scale.
@@ -345,7 +346,7 @@ Designed a reliable transaction management mechanism to ensure recharge requests
 * Used the **Circuit Breaker** state to determine whether requests should be processed immediately or deferred for later execution.
 * Leveraged Kafka to asynchronously process recharge requests by decoupling downstream bill processing from the synchronous API request, reducing response time while improving scalability
 * Introduced a dedicated **Deferred Processing Service** to periodically retrieve eligible recharge requests from PostgreSQL. Requests remained in an **awaiting** state while the external provider was unavailable and became eligible for processing only after successful health checks.
-* Maintained the complete transaction lifecycle using **PENDING**, **AWAITING=true**, **PROCESSING**, **SUCCESS**, and **FAILED** states, ensuring every recharge request remained traceable throughout the recovery process.
+* Maintained the complete transaction lifecycle using **PENDING**, **PROCESSING**, **SUCCESS**, and **FAILED** statuses, along with an **awaiting** flag to indicate whether a deferred transaction was eligible for recovery processing after external service restoration.
 
 
 ## Production Issues and Learnings
